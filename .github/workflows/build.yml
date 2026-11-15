@@ -1,4 +1,4 @@
-name: Compila APK Galleria
+name: Compila APK
 
 on:
   push:
@@ -8,41 +8,53 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: Estrai lo zip
         run: |
-          unzip -o Galleria.zip -d sorgente
-          DIR=$(dirname "$(find sorgente -name settings.gradle | head -n 1)")
-          echo "APPDIR=$DIR" >> $GITHUB_ENV
+          ZIP=$(find . -path ./.git -prune -o -iname '*.zip' -print | head -n 1)
+          if [ -z "$ZIP" ]; then echo "Nessun file .zip trovato nella repository"; exit 1; fi
+          echo "Trovato: $ZIP"
+          unzip -o -q "$ZIP" -d progetto
+          SET=$(find progetto -name 'settings.gradle*' -not -path '*/build/*' | head -n 1)
+          if [ -z "$SET" ]; then echo "settings.gradle non trovato nello zip"; exit 1; fi
+          echo "APPDIR=$(dirname "$SET")" >> $GITHUB_ENV
+          NOME=$(basename "$ZIP" | sed 's/\.[zZ][iI][pP]$//; s/[^A-Za-z0-9_-]/_/g')
+          echo "NOME=$NOME" >> $GITHUB_ENV
 
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      - name: Licenze Android
+        run: yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
 
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
 
       - name: Compila
-        run: cd "$APPDIR" && gradle assembleDebug --no-daemon --stacktrace
+        run: |
+          cd "$APPDIR"
+          if [ -f gradlew ]; then chmod +x gradlew && ./gradlew assembleDebug --no-daemon --stacktrace
+          else gradle assembleDebug --no-daemon --stacktrace; fi
 
       - name: Prepara APK
-        run: cp "$APPDIR/app/build/outputs/apk/debug/app-debug.apk" Galleria.apk
+        run: |
+          APK=$(find "$APPDIR" -name '*.apk' -path '*outputs/apk*' | head -n 1)
+          cp "$APK" "$NOME.apk"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: Galleria-APK
-          path: Galleria.apk
+          name: ${{ env.NOME }}-APK
+          path: ${{ env.NOME }}.apk
 
       - uses: softprops/action-gh-release@v2
         with:
-          tag_name: galleria-${{ github.run_number }}
-          name: Galleria ${{ github.run_number }}
-          files: Galleria.apk
+          tag_name: ${{ env.NOME }}-${{ github.run_number }}
+          name: ${{ env.NOME }} ${{ github.run_number }}
+          files: ${{ env.NOME }}.apk
